@@ -2117,11 +2117,11 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 user_id=member.id, infr_type="softban", reason=reason,
                 timestamp=current_ts, perpetrator=ctx.author.id)
 
-    @commands.command(aliases=["nitrokick", "nitro", "nk", "scam", "phish", "phishing"])
+    @commands.command(aliases=["nitro_kick", "nitrokick", "nitro", "nk", "scamkick", "scam", "sk", "phish", "phishing"])
     @utils.is_allowed(allowed_roles, throw_exc=True)
-    async def nitro_kick(self, ctx, member: Optional[discord.Member] = None, internal_use: bool = False) -> None:
-        """ (ModTeam/ADM) Mutes & Softbans a member from the server who's posting Nitro scam links.
-        :param member: The @ or ID of the user to nitrokick.
+    async def scam_kick(self, ctx, member: Optional[discord.Member] = None, internal_use: bool = False) -> None:
+        """ (ModTeam/ADM) Mutes & Softbans a member from the server who's posting scam links.
+        :param member: The @ or ID of the user to scam-kick.
         :param internal_use: Whether to bypass the moderator request process for internal use. """
     
         await ctx.message.delete()
@@ -2131,28 +2131,28 @@ We appreciate your understanding and look forward to hearing from you. """, embe
 
         current_ts: int = await utils.get_timestamp()
 
-        reason = "Nitro Scam"
+        reason = "**Scam-kicked** *by staff members.*"
 
         if not member:
             return await ctx.send(f"**Member not found, {author.mention}!**", delete_after=3)
 
         if await utils.is_allowed(allowed_roles).predicate(channel=ctx.channel, member=member):
-            return await ctx.send(f"**You cannot nitrokick a staff member, {author.mention}!**")
+            return await ctx.send(f"**You cannot scam-kick a staff member, {author.mention}!**")
         
         perpetrators = []
         confirmations = {}
 
-        should_nitro_kick = internal_use or await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=author)
+        should_scam_kick = internal_use or await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=author)
 
-        if not should_nitro_kick and not internal_use:
+        if not should_scam_kick and not internal_use:
             confirmations[author.id] = author.name
             mod_softban_embed = discord.Embed(
-                title=f"NitroKick Request ({len(confirmations)}/3)",
+                title=f"Scam-Kick Request ({len(confirmations)}/3)",
                 description=f'''
-                {author.mention} wants to nitrokick {member.mention}, it requires 2 more moderator ✅ reactions for it!
+                {author.mention} wants to scam-kick {member.mention}, it requires 2 more moderator ✅ reactions for it!
                 ```Reason: {reason}```''',
                 colour=discord.Colour.nitro_pink(), timestamp=ctx.message.created_at)
-            mod_softban_embed.set_author(name=f'{member} is being NitroKicked!', icon_url=member.display_avatar)
+            mod_softban_embed.set_author(name=f'{member} is being Scam-Kicked!', icon_url=member.display_avatar)
             msg = await ctx.send(embed=mod_softban_embed)
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
@@ -2185,29 +2185,29 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 try:
                     r, u = await self.client.wait_for("reaction_add", timeout=3600, check=check_mod)
                 except asyncio.TimeoutError:
-                    mod_softban_embed.description = f"Timeout, {member} is not getting nitrobanned!"
+                    mod_softban_embed.description = f"Timeout, {member} is not getting scam-kicked!"
                     await msg.remove_reaction("✅", self.client.user)
                     await msg.remove_reaction("❌", self.client.user)
                     return await msg.edit(embed=mod_softban_embed)
                 else:
-                    mod_softban_embed.title = f"NitroKick Request ({len(confirmations)}/3)"
+                    mod_softban_embed.title = f"Scam-Kick Request ({len(confirmations)}/3)"
                     await msg.edit(embed=mod_softban_embed)
                     if str(r.emoji) == "✅":
                         if await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=u):
-                            should_nitro_kick = True
+                            should_scam_kick = True
                             await msg.remove_reaction("❌", self.client.user)
                             break
                         elif len(confirmations) >= 0:
                             if len(confirmations) < 3:
                                 continue
                             elif len(confirmations) >= 3:
-                                should_nitro_kick = True
+                                should_scam_kick = True
                                 await msg.remove_reaction("❌", self.client.user)
                                 break
                     elif str(r.emoji) == "❌":
                         if await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=u):
-                            mod_softban_embed.title = "NitroKick Request"
-                            mod_softban_embed.description = "NitroKick request denied."
+                            mod_softban_embed.title = "Scam-Kick Request"
+                            mod_softban_embed.description = "Scam-Kick request denied."
                             await msg.edit(embed=mod_softban_embed)
                             await msg.remove_reaction("✅", self.client.user)
                             await msg.remove_reaction("❌", self.client.user)
@@ -2218,7 +2218,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                     else:
                         break
 
-        if not should_nitro_kick:
+        if not should_scam_kick:
             return
 
         # Checks if it was a moderator ban request or just a normal ban
@@ -2232,10 +2232,10 @@ We appreciate your understanding and look forward to hearing from you. """, embe
         # Bans and logs
         # General embed
         general_embed = discord.Embed(description=f'**Reason:** {reason}', color=discord.Color.nitro_pink())
-        general_embed.set_author(name=f'{member} has been nitrokicked', icon_url=member.display_avatar)
+        general_embed.set_author(name=f'{member} has been scam-kicked', icon_url=member.display_avatar)
         await ctx.send(embed=general_embed)
         try:
-            await member.send(content="Your account has been compromised and is now sending nitro scam links, please change your password and enable 2 Factor Authentication in order to regain access to our server\n\nhttps://discord.gg/languages", embed=general_embed)
+            await member.send(content="Your account has been compromised and is now sending scam messages, images and/or links, please change your password and enable 2 Factor Authentication in order to regain access to our server\n\nhttps://discord.gg/languages", embed=general_embed)
         except Exception as e:
             pass
         try:
@@ -2254,7 +2254,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
             current_ts = await utils.get_timestamp()
             infr_date = datetime.fromtimestamp(current_ts).strftime('%Y/%m/%d at %H:%M')
             perpetrator = ctx.author.name if ctx.author else "Unknown"
-            embed = discord.Embed(title='__**NitroKick**__', color=discord.Color.nitro_pink(),
+            embed = discord.Embed(title='__**Scam-Kick**__', color=discord.Color.nitro_pink(),
                                 timestamp=ctx.message.created_at)
             embed.add_field(name='User info:', value=f'```Name: {member.display_name}\nId: {member.id}```',
                             inline=False)
