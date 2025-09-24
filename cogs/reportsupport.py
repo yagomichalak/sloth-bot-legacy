@@ -87,6 +87,9 @@ class ReportSupport(*report_support_classes):
             guild = self.client.get_guild(server_id)
             channel = discord.utils.get(guild.channels, id=inactive_case[1])
 
+            if channel.name.endswith("-ongoing"):
+                continue # it will skip the "ongoing" cases
+
             if channel:
                 try:
                     await self.close_and_log_case_channel(guild, channel, self.client.user, True)
@@ -569,7 +572,31 @@ class ReportSupport(*report_support_classes):
                 forbid += 1
 
         return await ctx.send(f"**`{forbid}` {'witnesses/roles have' if forbid > 1 else 'witness/role has'} been forbidden from here!**")
-            
+
+    @commands.command(aliases=['ongoing', 'ongoingcase', 'dont_close', "dontclose", "stay_open", "stayopen", "keep_open", "keepopen"])
+    @commands.has_any_role(*allowed_roles)
+    async def ongoing_case(self, ctx):
+        """ (MOD) Marks the case as an ongoing case, which prevents it from being automatically closed by the bot. """
+        
+        await ctx.message.delete()
+        
+        case_channel = await self.get_case_channel(ctx.channel.id)
+        if not case_channel:
+            return await ctx.send(f"**This is not a case channel, {ctx.author.mention}!**", delete_after=6)
+
+        channel = discord.utils.get(ctx.guild.text_channels, id=case_channel[0][1])
+        if channel.name.endswith("-ongoing"):
+            return await ctx.send(f"**This case is already marked as an ongoing case, {ctx.author.mention}!**", delete_after=6)
+
+        embed = discord.Embed(
+            description="**Ongoing case.** Don't close!",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
+        
+        await channel.edit(name=f"{channel.name}-ongoing")
+        await ctx.send(f"**This case is now marked as an ongoing case, {ctx.author.mention}!**", delete_after=6)
+
     @commands.command(aliases=['delete_channel', 'archive', 'cc', "close_case", "end_case", "solve", "solved"])
     @commands.has_any_role(*allowed_roles)
     async def close_channel(self, ctx):
