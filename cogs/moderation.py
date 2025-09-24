@@ -118,45 +118,47 @@ class Moderation(*moderation_cogs):
                 return await self.check_unban_infractions(message)
 
         message_content_lower = message.content.lower()
-        scam_detected = False
+        scam_detected = None
 
         # check for scam words in text
         for word in scamwords:
             word_lower = word.lower()
             if re.search(rf'\b{re.escape(word_lower)}\b', message_content_lower):
-                scam_detected = True
+                scam_detected = "scam"
                 break
 
-        # current known image scam patterns:
-        # "1.png, 2.png, 3.png, 4.png" or "1.jpg, 2.jpg, 3.jpg, 4.jpg"
-        # or 4x "image.png" or "image.jpg" with @everyone ping
+        # image scam patterns
         png_pattern = ["1.png", "2.png", "3.png", "4.png"]
         jpg_pattern = ["1.jpg", "2.jpg", "3.jpg", "4.jpg"]
+        
+        # check for scam image patterns (with links and attachments)
+        links, link_names = [], []
+        attachment_names = [a.filename.lower() for a in message.attachments if a.filename]
+        if message.content: links = re.findall(r'(https?://[^\s]+)', message.content)
+        for link in links:
+            filename = link.split("/")[-1].split("?")[0].split("#")[0].lower()
+            link_names.append(filename)
+        if attachment_names or link_names:
+            all_image_names = attachment_names + link_names
 
-        # check for scam image patterns (with links)
-        if message.content:
-            links = re.findall(r'(https?://[^\s]+|http://[^\s]+)', message.content)
-            if links:
-                link_names = [link.split("/")[-1].lower() for link in links]
-                if all(name in link_names for name in png_pattern) or all(name in link_names for name in jpg_pattern):
-                    scam_detected = True
-                else:
-                    image_png_count = sum(1 for name in link_names if name == "image.png")
-                    image_jpg_count = sum(1 for name in link_names if name == "image.jpg")
-                    if ((image_png_count >= 4 or image_jpg_count >= 4) and "@everyone" in message_content_lower):
-                        scam_detected = True
-
-        # check for scam image patterns (with attachments)
-        if message.attachments:
-            image_names = [a.filename.lower() for a in message.attachments if a.filename]
-            if image_names:
-                if all(name in image_names for name in png_pattern) or all(name in image_names for name in jpg_pattern):
-                    scam_detected = True
-                elif ((image_names.count("image.png") >= 4 or image_names.count("image.jpg") >= 4) and "@everyone" in message_content_lower):
-                    scam_detected = True
+            image_png_count, image_jpg_count = all_image_names.count("image.png"), all_image_names.count("image.jpg")
+            png_jpg_images = [name for name in all_image_names if name.endswith(".png") or name.endswith(".jpg")]
+            mov_files = [name for name in all_image_names if name.endswith(".mov")]
+            if (image_png_count + image_jpg_count) >= 3 and "@everyone" in message_content_lower:
+                # check for at least 3 "image.png" or "image.jpg" and @everyone
+                scam_detected = "scam"
+            elif (image_png_count + image_jpg_count) >= 3 and mov_files:
+                # check for at least 3 images (png/jpg) plus a .mov file
+                scam_detected = "sus"
+            elif image_png_count + image_jpg_count >= 3:
+                # check for at least 3 "image.png" or "image.jpg"
+                scam_detected = "sus"
+            elif all(name in all_image_names for name in png_pattern) or all(name in all_image_names for name in jpg_pattern):
+                # check for 1.png-4.png or 1.jpg-4.jpg
+                scam_detected = "sus"
 
         if scam_detected:
-            await self.handle_scam(message)
+            await self.handle_scam(message, scam_detected)
             await message.delete()
             return
         
@@ -380,16 +382,19 @@ class Moderation(*moderation_cogs):
                 if not await utils.is_allowed(allowed_roles).predicate(ctx):
                     return await self._mute_callback(ctx, member=message.author, reason="Banned Link")
 
-    async def handle_scam(self, message):
+    async def handle_scam(self, message: discord.Message, scam_type: str = "scam") -> None:
+        if scam_type != "scam" and scam_type != "sus": return # just in case
+
         ctx = await self.client.get_context(message)
-        
+
         try:
-            scam_channel = self.client.get_channel(spam_log_channel_id)
-        except discord.NotFound:
-            return
+            mod_role = discord.utils.get(ctx.guild.roles, id=mod_role_id)
+            moderation_log = self.client.get_channel(mod_log_id)
+        except Exception:
+            return  # just in case
 
         user_id = message.author.id
-        current_time = time.time() * 1000  # Convert to milliseconds
+        current_time = time.time() * 1000  # convert to milliseconds
 
         last_notification = self.user_last_notification.get(user_id, 0)
         if current_time - last_notification < 5 * 60 * 1000:
@@ -399,24 +404,32 @@ class Moderation(*moderation_cogs):
 
         embed = discord.Embed(
             color=discord.Color.red(),
-            description=f"-# SCAM notification\n-# [Message Link]({message.jump_url})",
+            description=(
+                f"**{'Scam' if scam_type == 'scam' else 'Potential scam'} detected!**{' **Manual intervention needed.**' if scam_type == 'sus' else ''}\n"
+                f"-# {'*Messages deleted, user muted and kicked.*' if scam_type == 'scam' else '*Messages deleted, user muted as a precaution.*'}\n"
+            ),
             timestamp=discord.utils.utcnow(),
         )
 
         created_at, joined_at = int(message.author.created_at.timestamp()), int(message.author.joined_at.timestamp())
-        
-        embed.add_field(name="User", value=f"**ID:** {message.author.id}\n**Username:** {message.author}", inline=True)
+
+        embed.add_field(name="User", value=f"{message.author.mention}\n**ID:** {message.author.id}\n**Username:** {message.author}", inline=True)
         embed.add_field(name="Account Info", value=f"**Created:** <t:{created_at}:F>\n**Joined:** <t:{joined_at}:F>", inline=True)
         embed.add_field(name="Message Content", value=message.content, inline=False)
 
-        embed.set_footer(text="User muted and kicked", icon_url=message.guild.icon.url if message.guild.icon else None)
+        if scam_type == "scam":
+            embed.set_footer(text="User muted and kicked", icon_url=message.guild.icon.url if message.guild.icon else None)
+        elif scam_type == "sus":
+            embed.set_footer(text="User muted", icon_url=message.guild.icon.url if message.guild.icon else None)
 
-        if not await utils.is_allowed(allowed_roles).predicate(ctx, member=message.author):
-            # Send the embed to the scam channel if the member is not a staff member
-            await scam_channel.send(embed=embed)
-
-            # Nitro kick them if the member is not a staff member
-            await self.nitro_kick(ctx, member=message.author, internal_use=True)
+        if not await utils.is_allowed(allowed_roles).predicate(ctx, member=message.author):            
+            # scam-kick or mute them depending on the "certainty" if the member is not a staff member
+            if scam_type == "scam":
+                await moderation_log.send(embed=embed)
+                await self.scam_kick(ctx, member=message.author, internal_use=True)
+            elif scam_type == "sus":
+                await moderation_log.send(f"{mod_role.mention}", embed=embed)
+                await self._mute_callback(ctx, member=message.author, reason="**AUTO** - Suspicious scam pattern detected.")
 
     async def check_unban_infractions(self, message: discord.Message) -> None:
         """ Checks and send an infractions list of the user from the unban appeal request. """
