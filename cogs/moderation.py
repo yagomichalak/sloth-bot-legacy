@@ -2617,8 +2617,6 @@ We appreciate your understanding and look forward to hearing from you. """, embe
         embed.set_footer(text=f"Requested by {member}", icon_url=member.display_avatar)
         await ctx.send(embed=embed)
 
-
-
     # Infraction methods
     @commands.command(aliases=['infr', 'show_warnings', 'sw', 'show_bans', 'sb', 'show_muted', 'sm'])
     @commands.check_any(utils.is_allowed([*allowed_roles, event_manager_role_id, lesson_manager_role_id, analyst_debugger_role_id], throw_exc=True), utils.is_subscriber())
@@ -2696,11 +2694,13 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 color=member.color,
                 timestamp=ctx.message.created_at
             )
+            if len(user_infractions) > 20: embed.description = embed.description + "\n-# **`Found more than 20 infractions.`**\n-# *`Because of Discord limitations, showing only the latest 20 infractions.`*"
             embed.set_thumbnail(url=member.display_avatar)
             embed.set_author(name=member.id)    
             embed.set_footer(text=f"Requested by: {ctx.author}", icon_url=ctx.author.display_avatar)
 
-            for _, infr in enumerate(user_infractions):
+            # only shows the last 20 infractions to avoid Discord embed limitations (and the error that causes the list to not show at all)
+            for _, infr in enumerate(user_infractions[-20:]):
                 infr_date = datetime.fromtimestamp(infr[3]).strftime('%Y/%m/%d at %H:%M')
                 perpetrator_member = discord.utils.get(ctx.guild.members, id=infr[5])
                 perpetrator = perpetrator_member.name if perpetrator_member else "Unknown"
