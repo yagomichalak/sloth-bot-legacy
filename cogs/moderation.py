@@ -36,6 +36,7 @@ muted_role_id = int(os.getenv('MUTED_ROLE_ID', 123))
 timedout_role_id = int(os.getenv('TIMEDOUT_ROLE_ID', 123))
 preference_role_id = int(os.getenv('PREFERENCE_ROLE_ID', 123))
 ## variables.role.staff
+trial_mod_role_id = int(os.getenv('TRIAL_MOD_ROLE_ID', 123))
 mod_role_id = int(os.getenv('MOD_ROLE_ID', 123))
 staff_manager_role_id: int = int(os.getenv('STAFF_MANAGER_ROLE_ID', 123))
 admin_role_id: int = int(os.getenv('ADMIN_ROLE_ID', 123))
@@ -297,20 +298,21 @@ class Moderation(*moderation_cogs):
 
         # Restricted roles to monitor
         restricted_roles = [
+            trial_mod_role_id, # Trial Moderator
             native_centish_role_id, # Native Centish
-            based_role_id, # Based
-            few_braincells_role_id, # Few Braincells
+            based_role_id, # Based (name changes constantly)
+            few_braincells_role_id, # Few Braincells (name changes constantly)
             met_dnk_irl_role_id, # Met DNK IRL
             sponsor_role_id, # Server Sponsor
             sloth_nation_role_id, # Sloth Nation
             frog_catcher_role_id, # Frog Catcher
             native_ancient_latin_role_id # Native (ancient) Latin
-        ] # these comments were definitely needed fr
+        ] # these comments are needed
         
         # Unrestricted users and bots
         unrestricted = [
             216303189073461248 # Patreon Bot
-        ] # these comments ARE definitely needed
+        ] # these comments are DEFINITELY needed
 
         # Check if the new role is restricted
         if new_role.id in restricted_roles:
