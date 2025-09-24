@@ -2686,7 +2686,8 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                     unmute_alert = f"\u200b\n**♦️ This user will be unmuted <t:{times[0] + times[1]}:R>**\n\n"
 
             user_infractions = list(user_infractions)
-            user_infractions.sort(key=lambda x: x[3], reverse=False) # "reverse=True" for newest to oldest, "reverse=False" for oldest to newest 
+            reverse_mode = len(user_infractions) > 20
+            user_infractions.sort(key=lambda x: x[3], reverse=reverse_mode)
 
             embed = discord.Embed(
                 title=f"Infractions for {member}",
@@ -2694,13 +2695,14 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 color=member.color,
                 timestamp=ctx.message.created_at
             )
-            if len(user_infractions) > 20: embed.description = embed.description + "\n-# **`Found more than 20 infractions.`**\n-# *`Because of Discord limitations, showing only the latest 20 infractions.`*"
+            if len(user_infractions) > 20:
+                embed.description = embed.description + "\n-# **`Found more than 20 infractions.`**\n-# *`Because of Discord limitations, showing only the latest 20 infractions and they are ordered from newest to oldest.`*"
             embed.set_thumbnail(url=member.display_avatar)
-            embed.set_author(name=member.id)    
+            embed.set_author(name=member.id)
             embed.set_footer(text=f"Requested by: {ctx.author}", icon_url=ctx.author.display_avatar)
 
             # only shows the last 20 infractions to avoid Discord embed limitations (and the error that causes the list to not show at all)
-            for _, infr in enumerate(user_infractions[-20:]):
+            for _, infr in enumerate(user_infractions[:20]):
                 infr_date = datetime.fromtimestamp(infr[3]).strftime('%Y/%m/%d at %H:%M')
                 perpetrator_member = discord.utils.get(ctx.guild.members, id=infr[5])
                 perpetrator = perpetrator_member.name if perpetrator_member else "Unknown"
