@@ -936,7 +936,7 @@ class Moderation(*moderation_cogs):
         weight_map = {
             "lwarn": 0.5,
             "warn": 1,
-            "hwarn": 2
+            "hwarn": 1.5
         }
         warns = await self.get_warns(infractions)
         lwarns = sum(1 for w in warns if w[1] == "lwarn")
@@ -2677,7 +2677,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
 
             embed = discord.Embed(
                 title=f"Infractions for {member}",
-                description=f"{unmute_alert}```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*2)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
+                description=f"{unmute_alert}```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*1.5)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
                 color=member.color,
                 timestamp=ctx.message.created_at
             )
@@ -2799,7 +2799,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
 
                     embed = discord.Embed(
                         title=f"Removed Infractions for {member}",
-                        description=f"```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*2)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
+                        description=f"```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*1.5)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
                         colour=discord.Colour.dark_red(),
                         timestamp=ctx.message.created_at
                     )
