@@ -574,7 +574,7 @@ class ReportSupport(*report_support_classes):
         return await ctx.send(f"**`{forbid}` {'witnesses/roles have' if forbid > 1 else 'witness/role has'} been forbidden from here!**")
 
     @commands.command(aliases=['ongoing', 'ongoingcase', 'dont_close', "dontclose", "stay_open", "stayopen", "keep_open", "keepopen"])
-    @commands.has_any_role(*allowed_roles)
+    @utils.is_allowed([staff_manager_role_id], throw_exc=True)
     async def ongoing_case(self, ctx):
         """ (MOD) Marks the case as an ongoing case, which prevents it from being automatically closed by the bot. """
         
