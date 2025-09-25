@@ -541,15 +541,14 @@ class Moderation(*moderation_cogs):
         if not (mentioned_roles := await utils.get_roles(message)): return
 
         # Makes a set with the Staff roles
-        staff_mentions = set([
-            discord.utils.get(guild.roles, id=mod_role_id), # Mod
-            discord.utils.get(guild.roles, id=staff_manager_role_id), # Staff Manager
-            discord.utils.get(guild.roles, id=admin_role_id) # Admin
-        ])
+        mod, staff_manager, admin = discord.utils.get(guild.roles, id=mod_role_id), discord.utils.get(guild.roles, id=staff_manager_role_id), discord.utils.get(guild.roles, id=admin_role_id)
+        staff_mentions = set([mod, staff_manager, admin])
 
         # Checks whether any of the Staff roles were in the list of roles pinged in the message
         if staff_mentions.intersection(set(mentioned_roles)):
             report_support_channel = discord.utils.get(guild.text_channels, id=int(os.getenv("REPORT_CHANNEL_ID")))
+            
+            if mod in mentioned_roles: await message.channel.send(f"{staff_manager.mention}", delete_after=3)
             await message.channel.send(f"You should use {report_support_channel.mention} for help reports!")
 
     @commands.Cog.listener(name="on_member_join")
