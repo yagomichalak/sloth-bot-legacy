@@ -308,6 +308,8 @@ class Moderation(*moderation_cogs):
         elif (before.mute != after.mute) or (before.deaf != after.deaf):
             # definitely a mute or deafen
             action = discord.AuditLogAction.member_update
+        else:
+            return # something else is going on, let's skip it
 
         # timestamp
         current_ts = await utils.get_timestamp()
