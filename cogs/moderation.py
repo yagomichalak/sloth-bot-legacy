@@ -161,6 +161,7 @@ class Moderation(*moderation_cogs):
         if scam_detected:
             await self.handle_scam(message, scam_detected)
             await message.delete()
+            await message.channel.send("https://tenor.com/view/south-park-police-police-man-do-not-cross-police-line-do-not-cross-gif-17893474", delete_after=6)
             return
         
         # Checks if someone pinged Staff
