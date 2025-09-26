@@ -127,10 +127,10 @@ class Moderation(*moderation_cogs):
                 scam_detected = "scam"
                 break
 
-        # image scam patterns
-        png_pattern = ["1.png", "2.png", "3.png", "4.png"]
-        jpg_pattern = ["1.jpg", "2.jpg", "3.jpg", "4.jpg"]
-        
+        # image scam patterns and extensions
+        image_patterns = ["1.png", "2.png", "3.png", "4.png", "1.jpg", "2.jpg", "3.jpg", "4.jpg", "1.jpeg", "2.jpeg", "3.jpeg", "4.jpeg", "1.webp", "2.webp", "3.webp", "4.webp"]
+        image_extensions = ["image.png", "image.jpg", "image.jpeg", "image.webp"]
+
         # check for scam image patterns (with links and attachments)
         links, link_names = [], []
         attachment_names = [a.filename.lower() for a in message.attachments if a.filename]
@@ -141,20 +141,21 @@ class Moderation(*moderation_cogs):
         if attachment_names or link_names:
             all_image_names = attachment_names + link_names
 
-            image_png_count, image_jpg_count = all_image_names.count("image.png"), all_image_names.count("image.jpg")
-            png_jpg_images = [name for name in all_image_names if name.endswith(".png") or name.endswith(".jpg")]
+            total_image_count = sum(all_image_names.count(ext) for ext in image_extensions)
             mov_files = [name for name in all_image_names if name.endswith(".mov")]
-            if (image_png_count + image_jpg_count) >= 3 and "@everyone" in message_content_lower:
-                # check for at least 3 "image.png" or "image.jpg" and @everyone
+            
+            patterns_count = sum(1 for name in all_image_names if name in image_patterns)
+            if (total_image_count >= 3 or patterns_count >= 3) and "@everyone" in message_content_lower:
+                # check for at least 3 "image" files and @everyone
                 scam_detected = "scam"
-            elif (image_png_count + image_jpg_count) >= 3 and mov_files:
+            elif total_image_count >= 3 and mov_files:
                 # check for at least 3 images (png/jpg) plus a .mov file
                 scam_detected = "sus"
-            elif image_png_count + image_jpg_count >= 3:
-                # check for at least 3 "image.png" or "image.jpg"
+            elif total_image_count >= 3:
+                # check for at least 3 "image" files
                 scam_detected = "sus"
-            elif all(name in all_image_names for name in png_pattern) or all(name in all_image_names for name in jpg_pattern):
-                # check for 1.png-4.png or 1.jpg-4.jpg
+            elif patterns_count >= 3:
+                # check for at least 3 images from the patterns list
                 scam_detected = "sus"
 
         if scam_detected:
