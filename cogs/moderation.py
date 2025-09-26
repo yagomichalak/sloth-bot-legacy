@@ -305,47 +305,71 @@ class Moderation(*moderation_cogs):
         elif before.channel and after.channel and before.channel != after.channel:
             # might be a move
             action = discord.AuditLogAction.member_move
-        else:
-            return  # neither a move nor disconnect, so ignore
-
-        # get the cache up and running
-        if user.guild.id not in self.audit_cache:
-            self.audit_cache[user.guild.id] = []
+        elif (before.mute != after.mute) or (before.deaf != after.deaf):
+            # definitely a mute or deafen
+            action = discord.AuditLogAction.member_update
 
         # timestamp
         current_ts = await utils.get_timestamp()
 
-        try:
-            perpetrator = None
-            async for entry in user.guild.audit_logs(limit=10, action=action):
-                if entry.user.bot: continue # skip if done by a bot
-                if entry.user == user: continue # skip if the perpetrator and user is the same
-                                
-                # try finding an existing cached entry
-                cached_entry = next((e for e in self.audit_cache[user.guild.id] if e.id == entry.id), None)
-                
-                if cached_entry and cached_entry.extra.count != entry.extra.count:
-                    perpetrator = entry.user
+        update_type = None
+        if action != discord.AuditLogAction.member_update:
+            # get the cache up and running
+            if user.guild.id not in self.audit_cache:
+                self.audit_cache[user.guild.id] = []
+
+            try:
+                perpetrator = None
+                async for entry in user.guild.audit_logs(limit=6, action=action):
+                    if entry.user.bot: continue # skip if done by a bot
+                    if entry.user == user: continue # skip if the perpetrator and user is the same
+                                    
+                    # try finding an existing cached entry
+                    cached_entry = next((e for e in self.audit_cache[user.guild.id] if e.id == entry.id), None)
                     
-                    # remove the cached entry and remake it
-                    self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if e.id != entry.id]
-                    self.audit_cache[user.guild.id].append(entry)
-                else:
-                    if (current_ts - entry.created_at.timestamp()) > 3: continue # check if the audit log entry is fresh (within three seconds) and if not, skip
-                    if entry.extra.count > 1: continue # we only care about the new audit logs
-                    perpetrator = entry.user
-                                        
-                    # make a new cached audit entry
-                    self.audit_cache[user.guild.id].append(entry)
-                if perpetrator: break # we found what we needed, time to log
-            if not perpetrator: return # this would mean that we could not find a relevant audit entry, so no logging needed
-        except discord.Forbidden:
-            return # not needed but doesn't hurt, when bot lacks permissions to view audit logs
-        
-        # remove expired entries
-        if self.last_cache_check is None or (current_ts - self.last_cache_check) < 180:
-            self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if (current_ts - e.created_at.timestamp()) < 180]
-            self.last_cache_check = current_ts
+                    if cached_entry and cached_entry.extra.count != entry.extra.count:
+                        perpetrator = entry.user
+                        
+                        # remove the cached entry and remake it
+                        self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if e.id != entry.id]
+                        self.audit_cache[user.guild.id].append(entry)
+                    else:
+                        if (current_ts - entry.created_at.timestamp()) > 3: continue # check if the audit log entry is fresh (within three seconds) and if not, skip
+                        if entry.extra.count > 1: continue # we only care about the new audit logs
+                        perpetrator = entry.user
+                                            
+                        # make a new cached audit entry
+                        self.audit_cache[user.guild.id].append(entry)
+                    if perpetrator: break # we found what we needed, time to log
+                if not perpetrator: return # this would mean that we could not find a relevant audit entry, so no logging needed
+            except discord.Forbidden:
+                return # not needed but doesn't hurt, when bot lacks permissions to view audit logs
+            
+            # remove expired entries
+            if self.last_cache_check is None or (current_ts - self.last_cache_check) < 180:
+                self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if (current_ts - e.created_at.timestamp()) < 180]
+                self.last_cache_check = current_ts
+        else:
+            try:
+                perpetrator, target = None, None
+                async for entry in user.guild.audit_logs(limit=6, action=action):
+                    if entry.user.bot: continue # skip if done by a bot
+                    if entry.user == user: continue # skip if the perpetrator and user is the same
+                    if (current_ts - entry.created_at.timestamp()) > 3: continue # skip if the audit log entry is not fresh (within three seconds)
+                    
+                    if before.mute != after.mute:
+                        if after.mute is True: update_type = "mute"
+                        else: update_type = "unmute"
+                    elif before.deaf != after.deaf:
+                        if after.deaf is True: update_type = "deafen"
+                        else: update_type = "undeafen"
+                    
+                    perpetrator, target = entry.user, entry.target
+                    
+                    if perpetrator and target: break # we found what we needed, time to log
+                if not perpetrator and not target: return # this would mean that we could not find a relevant audit entry, so no logging needed
+            except discord.Forbidden:
+                return # not needed but doesn't hurt, when bot lacks permissions to view audit logs
 
         # mod log channel
         moderation_log = discord.utils.get(user.guild.channels, id=mod_log_id)
@@ -354,21 +378,41 @@ class Moderation(*moderation_cogs):
         # embed title and description
         if action == discord.AuditLogAction.member_disconnect:
             title = "__**Forced Disconnect**__"
+            description = f"**{user.mention} got force disconnected.** More info below.\n-# *This information should be correct, but mistakes may still occur occasionally, as Discord is one of the companies of all time and we are literally dealing with breadcrumbs.*"
             type = "Disconnected"
             value = f"{before.channel.mention}"
         elif action == discord.AuditLogAction.member_move:
             title = "__**Forced Move**__"
+            description = f"**{user.mention} got force moved.** More info below.\n-# *This information should be correct, but mistakes may still occur occasionally, as Discord is one of the companies of all time and we are literally dealing with breadcrumbs.*"
             type = "Moved"
             value = f"{before.channel.mention} -> {after.channel.mention}"
+        elif action == discord.AuditLogAction.member_update:
+            if update_type == "mute":
+                title = "__**Server Muted**__"
+                description = f"**{user.mention} is server muted.**\n-# More info below."
+                type = "Muted"
+            elif update_type == "unmute":
+                title = "__**Server Unmuted**__"
+                description = f"**{user.mention} is no longer server muted.**\n-# More info below."
+                type = "Unmuted"
+            elif update_type == "deafen":
+                title = "__**Server Deafened**__"
+                description = f"**{user.mention} is server deafened.**\n-# More info below."
+                type = "Deafened"
+            elif update_type == "undeafen":
+                title = "__**Server Undeafened**__"
+                description = f"**{user.mention} is no longer server deafened.**\n-# More info below."
+                type = "Undeafened"
 
         embed = discord.Embed(
             title=title,
-            description=f"-# *This information should be correct, but mistakes may still occur occasionally, as Discord is one of the companies of all time and we are literally dealing with breadcrumbs.*",
+            description=description,
             colour=discord.Colour.orange(),
             timestamp=datetime.fromtimestamp(current_ts)
         )
-        embed.add_field(name="User Info", value=f"{user.mention}\n**ID:** {user.id}\n**Username:** {user}", inline=True)
-        embed.add_field(name="Channel Info", value=value, inline=True)
+        embed.add_field(name="User Info", value=f"**ID:** {user.id}\n**Username:** {user}", inline=True)
+        if not update_type:
+            embed.add_field(name="Channel Info", value=value, inline=True)
         embed.set_footer(text=f"{type} by {perpetrator.name}", icon_url=perpetrator.display_avatar)
 
         await moderation_log.send(embed=embed)
