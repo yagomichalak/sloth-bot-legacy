@@ -825,7 +825,8 @@ class ReportSupport(*report_support_classes):
 
         # Set channel perms for the user.
         await parent_channel.set_permissions(applicant, read_messages=True, send_messages=False, view_channel=True)
-        # await interview_vc.set_permissions(applicant, speak=True, connect=True, view_channel=True)
+        if app[2].title().lower == "teacher":
+            await interview_vc.set_permissions(applicant, speak=True, connect=True, view_channel=True)
 
         application_type = app[2].title().replace('_', ' ')
 
