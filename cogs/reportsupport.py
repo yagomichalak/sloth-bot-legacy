@@ -729,29 +729,53 @@ class ReportSupport(*report_support_classes):
                 if message.content or message.embeds:
                     if message.embeds:
                         for i in range(0, len(message.embeds), 10):
+                            try:
+                                await webhook.send(
+                                    content=safe_content if message.content and i == 0 else None,
+                                    username=user_name,
+                                    avatar_url=user_avatar,
+                                    embeds=message.embeds[i:i+10],
+                                    thread=thread
+                                )
+                            except Exception as e:
+                                await webhook.send(
+                                    content=f"**[ERROR!]** Failed while forwarding a message with embeds.\n-# **Error:** {e}",
+                                    userame=user_name,
+                                    avatar_url=user_avatar,
+                                    thread=thread
+                                )
+                    else:
+                        try:
                             await webhook.send(
-                                content=safe_content if message.content and i == 0 else None,
+                                content=safe_content if message.content else None,
                                 username=user_name,
                                 avatar_url=user_avatar,
-                                embeds=message.embeds[i:i+10],
                                 thread=thread
                             )
-                    else:
+                        except Exception as e:
+                            await webhook.send(
+                                content=f"**[ERROR!]** Failed while forwarding a message.\n-# **Error:** {e}",
+                                userame=user_name,
+                                avatar_url=user_avatar,
+                                thread=thread
+                            )
+
+                if message.attachments:
+                    try:
+                        files = [await attachment.to_file() for attachment in message.attachments]
                         await webhook.send(
-                            content=safe_content if message.content else None,
                             username=user_name,
+                            avatar_url=user_avatar,
+                            files=files,
+                            thread=thread
+                        )
+                    except Exception as e:
+                        await webhook.send(
+                            content=f"**[ERROR!]** Failed while forwarding a file.\n-# **Error:** {e}",
+                            userame=user_name,
                             avatar_url=user_avatar,
                             thread=thread
                         )
-
-                if message.attachments:
-                    files = [await attachment.to_file() for attachment in message.attachments]
-                    await webhook.send(
-                        username=user_name,
-                        avatar_url=user_avatar,
-                        files=files,
-                        thread=thread
-                    )
                 
         # close/archive the thread after forwarding all messages
         await thread.edit(archived=True, locked=True)
