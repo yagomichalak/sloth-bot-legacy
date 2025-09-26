@@ -962,6 +962,32 @@ class ReportSupport(*report_support_classes):
         self.client.add_view(view=applyView)
         self.client.add_view(view=reportView)
 
+    # temporary command, will be removed in the next update
+    @commands.command()
+    @utils.is_allowed([staff_manager_role_id], throw_exc=True)
+    async def clean_one_specific_case_log(self, ctx) -> None:
+        """ (Staff Management) Cleans up a specific old case log (threads) that spammed itself sooo many times. Temporary command, will be removed later. """
+
+        await ctx.message.delete()
+
+        case_log_channel = self.client.get_channel(case_log_id)
+        deleted_threads = 0
+
+        if not case_log_channel:
+            await ctx.send("**Case log channel not found!**")
+            return
+
+        threads = await case_log_channel.threads()
+        for thread in threads:
+            if thread.name == "case-18122-log":
+                try:
+                    await thread.delete()
+                    deleted_threads += 1
+                except Exception as e:
+                    print(f"Failed to delete thread {thread.name}: {e}")
+
+        await ctx.send(f"**Deleted {deleted_threads} thread(s) named 'case-18122-log'.**", delete_after=11)
+
 def setup(client):
     client.add_cog(ReportSupport(client))
 
