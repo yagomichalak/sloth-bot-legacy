@@ -36,6 +36,7 @@ muted_role_id = int(os.getenv('MUTED_ROLE_ID', 123))
 timedout_role_id = int(os.getenv('TIMEDOUT_ROLE_ID', 123))
 preference_role_id = int(os.getenv('PREFERENCE_ROLE_ID', 123))
 ## variables.role.staff
+trial_mod_role_id = int(os.getenv('TRIAL_MOD_ROLE_ID', 123))
 mod_role_id = int(os.getenv('MOD_ROLE_ID', 123))
 staff_manager_role_id: int = int(os.getenv('STAFF_MANAGER_ROLE_ID', 123))
 admin_role_id: int = int(os.getenv('ADMIN_ROLE_ID', 123))
@@ -70,7 +71,7 @@ scamwords = [
     # steam scam
     "steam gift 50$", "50$ steam gift",
     # links
-    "steamncommynity.com", "steamcommunity.com/gift-card/pay/50", "airdrop-stake.com", "xcoin-presale.com", "ainexusca.com", "u.to", "e.vg", "leaksdaily.com",
+    "steamncommynity.com", "steamcommunity.com/gift-card/pay/50", "steamcommunity.com/gift/activation=", "airdrop-stake.com", "xcoin-presale.com", "ainexusca.com", "u.to", "e.vg", "leaksdaily.com",
     # numbers
     "+1 (618) 913-0036", "+1 (626) 514-0696", "+1 (814) 813-1670",
     # nicks
@@ -99,6 +100,8 @@ class Moderation(*moderation_cogs):
         self.client = client
         self.db = DatabaseCore()
         self.user_last_notification = {}
+        self.audit_cache = {}
+        self.last_cache_check = None
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -117,46 +120,50 @@ class Moderation(*moderation_cogs):
                 return await self.check_unban_infractions(message)
 
         message_content_lower = message.content.lower()
-        scam_detected = False
+        scam_detected = None
 
         # check for scam words in text
         for word in scamwords:
             word_lower = word.lower()
             if re.search(rf'\b{re.escape(word_lower)}\b', message_content_lower):
-                scam_detected = True
+                scam_detected = "scam"
                 break
 
-        # current known image scam patterns:
-        # "1.png, 2.png, 3.png, 4.png" or "1.jpg, 2.jpg, 3.jpg, 4.jpg"
-        # or 4x "image.png" or "image.jpg" with @everyone ping
-        png_pattern = ["1.png", "2.png", "3.png", "4.png"]
-        jpg_pattern = ["1.jpg", "2.jpg", "3.jpg", "4.jpg"]
+        # image scam patterns and extensions
+        image_patterns = ["1.png", "2.png", "3.png", "4.png", "1.jpg", "2.jpg", "3.jpg", "4.jpg", "1.jpeg", "2.jpeg", "3.jpeg", "4.jpeg", "1.webp", "2.webp", "3.webp", "4.webp"]
+        image_extensions = ["image.png", "image.jpg", "image.jpeg", "image.webp"]
 
-        # check for scam image patterns (with links)
-        if message.content:
-            links = re.findall(r'(https?://[^\s]+|http://[^\s]+)', message.content)
-            if links:
-                link_names = [link.split("/")[-1].lower() for link in links]
-                if all(name in link_names for name in png_pattern) or all(name in link_names for name in jpg_pattern):
-                    scam_detected = True
-                else:
-                    image_png_count = sum(1 for name in link_names if name == "image.png")
-                    image_jpg_count = sum(1 for name in link_names if name == "image.jpg")
-                    if ((image_png_count >= 4 or image_jpg_count >= 4) and "@everyone" in message_content_lower):
-                        scam_detected = True
+        # check for scam image patterns (with links and attachments)
+        links, link_names = [], []
+        attachment_names = [a.filename.lower() for a in message.attachments if a.filename]
+        if message.content: links = re.findall(r'(https?://[^\s]+)', message.content)
+        for link in links:
+            filename = link.split("/")[-1].split("?")[0].split("#")[0].lower()
+            link_names.append(filename)
+        if attachment_names or link_names:
+            all_image_names = attachment_names + link_names
 
-        # check for scam image patterns (with attachments)
-        if message.attachments:
-            image_names = [a.filename.lower() for a in message.attachments if a.filename]
-            if image_names:
-                if all(name in image_names for name in png_pattern) or all(name in image_names for name in jpg_pattern):
-                    scam_detected = True
-                elif ((image_names.count("image.png") >= 4 or image_names.count("image.jpg") >= 4) and "@everyone" in message_content_lower):
-                    scam_detected = True
+            total_image_count = sum(all_image_names.count(ext) for ext in image_extensions)
+            mov_files = [name for name in all_image_names if name.endswith(".mov")]
+            
+            patterns_count = sum(1 for name in all_image_names if name in image_patterns)
+            if (total_image_count >= 3 or patterns_count >= 3) and "@everyone" in message_content_lower:
+                # check for at least 3 "image" files and @everyone
+                scam_detected = "scam"
+            elif total_image_count >= 3 and mov_files:
+                # check for at least 3 images (png/jpg) plus a .mov file
+                scam_detected = "sus"
+            elif total_image_count >= 3:
+                # check for at least 3 "image" files
+                scam_detected = "sus"
+            elif patterns_count >= 3:
+                # check for at least 3 images from the patterns list
+                scam_detected = "sus"
 
         if scam_detected:
-            await self.handle_scam(message)
+            await self.handle_scam(message, scam_detected)
             await message.delete()
+            await message.channel.send("https://tenor.com/view/south-park-police-police-man-do-not-cross-police-line-do-not-cross-gif-17893474", delete_after=6)
             return
         
         # Checks if someone pinged Staff
@@ -287,6 +294,130 @@ class Moderation(*moderation_cogs):
 
         # send the log and insert a ban infraction to the database
         await moderation_log.send(embed=embed)
+    
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, user: discord.User, before: discord.VoiceState, after: discord.VoiceState):
+        """ Logs if a member was moved or disconnected from a voice channel via moderation. """
+
+        if before.channel and not after.channel:
+            # might be a disconnect, check if it was forced
+            action = discord.AuditLogAction.member_disconnect
+        elif before.channel and after.channel and before.channel != after.channel:
+            # might be a move
+            action = discord.AuditLogAction.member_move
+        elif (before.mute != after.mute) or (before.deaf != after.deaf):
+            # definitely a mute or deafen
+            action = discord.AuditLogAction.member_update
+        else:
+            return # something else is going on, let's skip it
+
+        # timestamp
+        current_ts = await utils.get_timestamp()
+
+        update_type = None
+        if action != discord.AuditLogAction.member_update:
+            # get the cache up and running
+            if user.guild.id not in self.audit_cache:
+                self.audit_cache[user.guild.id] = []
+
+            try:
+                perpetrator = None
+                async for entry in user.guild.audit_logs(limit=6, action=action):
+                    if entry.user.bot: continue # skip if done by a bot
+                    if entry.user == user: continue # skip if the perpetrator and user is the same
+                                    
+                    # try finding an existing cached entry
+                    cached_entry = next((e for e in self.audit_cache[user.guild.id] if e.id == entry.id), None)
+                    
+                    if cached_entry and cached_entry.extra.count != entry.extra.count:
+                        perpetrator = entry.user
+                        
+                        # remove the cached entry and remake it
+                        self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if e.id != entry.id]
+                        self.audit_cache[user.guild.id].append(entry)
+                    else:
+                        if (current_ts - entry.created_at.timestamp()) > 3: continue # check if the audit log entry is fresh (within three seconds) and if not, skip
+                        if entry.extra.count > 1: continue # we only care about the new audit logs
+                        perpetrator = entry.user
+                                            
+                        # make a new cached audit entry
+                        self.audit_cache[user.guild.id].append(entry)
+                    if perpetrator: break # we found what we needed, time to log
+                if not perpetrator: return # this would mean that we could not find a relevant audit entry, so no logging needed
+            except discord.Forbidden:
+                return # not needed but doesn't hurt, when bot lacks permissions to view audit logs
+            
+            # remove expired entries
+            if self.last_cache_check is None or (current_ts - self.last_cache_check) < 180:
+                self.audit_cache[user.guild.id] = [e for e in self.audit_cache[user.guild.id] if (current_ts - e.created_at.timestamp()) < 180]
+                self.last_cache_check = current_ts
+        else:
+            try:
+                perpetrator, target = None, None
+                async for entry in user.guild.audit_logs(limit=6, action=action):
+                    if entry.user.bot: continue # skip if done by a bot
+                    if entry.user == user: continue # skip if the perpetrator and user is the same
+                    if (current_ts - entry.created_at.timestamp()) > 3: continue # skip if the audit log entry is not fresh (within three seconds)
+                    
+                    if before.mute != after.mute:
+                        if after.mute is True: update_type = "mute"
+                        else: update_type = "unmute"
+                    elif before.deaf != after.deaf:
+                        if after.deaf is True: update_type = "deafen"
+                        else: update_type = "undeafen"
+                    
+                    perpetrator, target = entry.user, entry.target
+                    
+                    if perpetrator and target: break # we found what we needed, time to log
+                if not perpetrator and not target: return # this would mean that we could not find a relevant audit entry, so no logging needed
+            except discord.Forbidden:
+                return # not needed but doesn't hurt, when bot lacks permissions to view audit logs
+
+        # mod log channel
+        moderation_log = discord.utils.get(user.guild.channels, id=mod_log_id)
+        if moderation_log is None: return # just in case
+
+        # embed title and description
+        if action == discord.AuditLogAction.member_disconnect:
+            title = "__**Forced Disconnect**__"
+            description = f"**{user.mention} got force disconnected.** More info below.\n-# *This information should be correct, but mistakes may still occur occasionally, as Discord is one of the companies of all time and we are literally dealing with breadcrumbs.*"
+            type = "Disconnected"
+            value = f"{before.channel.mention}"
+        elif action == discord.AuditLogAction.member_move:
+            title = "__**Forced Move**__"
+            description = f"**{user.mention} got force moved.** More info below.\n-# *This information should be correct, but mistakes may still occur occasionally, as Discord is one of the companies of all time and we are literally dealing with breadcrumbs.*"
+            type = "Moved"
+            value = f"{before.channel.mention} -> {after.channel.mention}"
+        elif action == discord.AuditLogAction.member_update:
+            if update_type == "mute":
+                title = "__**Server Muted**__"
+                description = f"**{user.mention} is server muted.**\n-# More info below."
+                type = "Muted"
+            elif update_type == "unmute":
+                title = "__**Server Unmuted**__"
+                description = f"**{user.mention} is no longer server muted.**\n-# More info below."
+                type = "Unmuted"
+            elif update_type == "deafen":
+                title = "__**Server Deafened**__"
+                description = f"**{user.mention} is server deafened.**\n-# More info below."
+                type = "Deafened"
+            elif update_type == "undeafen":
+                title = "__**Server Undeafened**__"
+                description = f"**{user.mention} is no longer server deafened.**\n-# More info below."
+                type = "Undeafened"
+
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            colour=discord.Colour.orange(),
+            timestamp=datetime.fromtimestamp(current_ts)
+        )
+        embed.add_field(name="User Info", value=f"**ID:** {user.id}\n**Username:** {user}", inline=True)
+        if not update_type:
+            embed.add_field(name="Channel Info", value=value, inline=True)
+        embed.set_footer(text=f"{type} by {perpetrator.name}", icon_url=perpetrator.display_avatar)
+
+        await moderation_log.send(embed=embed)
 
     async def check_restricted_roles(self, member, new_role):
         """ Checks if a restricted role is added by unauthorized users and removes it.
@@ -297,20 +428,21 @@ class Moderation(*moderation_cogs):
 
         # Restricted roles to monitor
         restricted_roles = [
+            trial_mod_role_id, # Trial Moderator
             native_centish_role_id, # Native Centish
-            based_role_id, # Based
-            few_braincells_role_id, # Few Braincells
+            based_role_id, # Based (name changes constantly)
+            few_braincells_role_id, # Few Braincells (name changes constantly)
             met_dnk_irl_role_id, # Met DNK IRL
             sponsor_role_id, # Server Sponsor
             sloth_nation_role_id, # Sloth Nation
             frog_catcher_role_id, # Frog Catcher
             native_ancient_latin_role_id # Native (ancient) Latin
-        ] # these comments were definitely needed fr
+        ] # these comments are needed
         
         # Unrestricted users and bots
         unrestricted = [
             216303189073461248 # Patreon Bot
-        ] # these comments ARE definitely needed
+        ] # these comments are DEFINITELY needed
 
         # Check if the new role is restricted
         if new_role.id in restricted_roles:
@@ -378,16 +510,19 @@ class Moderation(*moderation_cogs):
                 if not await utils.is_allowed(allowed_roles).predicate(ctx):
                     return await self._mute_callback(ctx, member=message.author, reason="Banned Link")
 
-    async def handle_scam(self, message):
+    async def handle_scam(self, message: discord.Message, scam_type: str = "scam") -> None:
+        if scam_type != "scam" and scam_type != "sus": return # just in case
+
         ctx = await self.client.get_context(message)
-        
+
         try:
-            scam_channel = self.client.get_channel(spam_log_channel_id)
-        except discord.NotFound:
-            return
+            mod_role = discord.utils.get(ctx.guild.roles, id=mod_role_id)
+            moderation_log = self.client.get_channel(mod_log_id)
+        except Exception:
+            return  # just in case
 
         user_id = message.author.id
-        current_time = time.time() * 1000  # Convert to milliseconds
+        current_time = time.time() * 1000  # convert to milliseconds
 
         last_notification = self.user_last_notification.get(user_id, 0)
         if current_time - last_notification < 5 * 60 * 1000:
@@ -397,24 +532,32 @@ class Moderation(*moderation_cogs):
 
         embed = discord.Embed(
             color=discord.Color.red(),
-            description=f"-# SCAM notification\n-# [Message Link]({message.jump_url})",
+            description=(
+                f"**{'Scam' if scam_type == 'scam' else 'Potential scam'} detected!**{' **Manual intervention needed.**' if scam_type == 'sus' else ''}\n"
+                f"-# {'*Messages deleted, user muted and kicked.*' if scam_type == 'scam' else '*Messages deleted, user muted as a precaution.*'}\n"
+            ),
             timestamp=discord.utils.utcnow(),
         )
 
         created_at, joined_at = int(message.author.created_at.timestamp()), int(message.author.joined_at.timestamp())
-        
-        embed.add_field(name="User", value=f"**ID:** {message.author.id}\n**Username:** {message.author}", inline=True)
+
+        embed.add_field(name="User", value=f"{message.author.mention}\n**ID:** {message.author.id}\n**Username:** {message.author}", inline=True)
         embed.add_field(name="Account Info", value=f"**Created:** <t:{created_at}:F>\n**Joined:** <t:{joined_at}:F>", inline=True)
         embed.add_field(name="Message Content", value=message.content, inline=False)
 
-        embed.set_footer(text="User muted and kicked", icon_url=message.guild.icon.url if message.guild.icon else None)
+        if scam_type == "scam":
+            embed.set_footer(text="User muted and kicked", icon_url=message.guild.icon.url if message.guild.icon else None)
+        elif scam_type == "sus":
+            embed.set_footer(text="User muted", icon_url=message.guild.icon.url if message.guild.icon else None)
 
-        if not await utils.is_allowed(allowed_roles).predicate(ctx, member=message.author):
-            # Send the embed to the scam channel if the member is not a staff member
-            await scam_channel.send(embed=embed)
-
-            # Nitro kick them if the member is not a staff member
-            await self.nitro_kick(ctx, member=message.author, internal_use=True)
+        if not await utils.is_allowed(allowed_roles).predicate(ctx, member=message.author):            
+            # scam-kick or mute them depending on the "certainty" if the member is not a staff member
+            if scam_type == "scam":
+                await moderation_log.send(embed=embed)
+                await self.scam_kick(ctx, member=message.author, internal_use=True)
+            elif scam_type == "sus":
+                await moderation_log.send(f"{mod_role.mention}", embed=embed)
+                await self._mute_callback(ctx, member=message.author, reason="**AUTO** - Suspicious scam pattern detected.")
 
     async def check_unban_infractions(self, message: discord.Message) -> None:
         """ Checks and send an infractions list of the user from the unban appeal request. """
@@ -526,15 +669,14 @@ class Moderation(*moderation_cogs):
         if not (mentioned_roles := await utils.get_roles(message)): return
 
         # Makes a set with the Staff roles
-        staff_mentions = set([
-            discord.utils.get(guild.roles, id=mod_role_id), # Mod
-            discord.utils.get(guild.roles, id=staff_manager_role_id), # Staff Manager
-            discord.utils.get(guild.roles, id=admin_role_id) # Admin
-        ])
+        mod, staff_manager, admin = discord.utils.get(guild.roles, id=mod_role_id), discord.utils.get(guild.roles, id=staff_manager_role_id), discord.utils.get(guild.roles, id=admin_role_id)
+        staff_mentions = set([mod, staff_manager, admin])
 
         # Checks whether any of the Staff roles were in the list of roles pinged in the message
         if staff_mentions.intersection(set(mentioned_roles)):
             report_support_channel = discord.utils.get(guild.text_channels, id=int(os.getenv("REPORT_CHANNEL_ID")))
+            
+            if mod in mentioned_roles: await message.channel.send(f"{staff_manager.mention}", delete_after=3)
             await message.channel.send(f"You should use {report_support_channel.mention} for help reports!")
 
     @commands.Cog.listener(name="on_member_join")
@@ -936,7 +1078,7 @@ class Moderation(*moderation_cogs):
         weight_map = {
             "lwarn": 0.5,
             "warn": 1,
-            "hwarn": 2
+            "hwarn": 1.5
         }
         warns = await self.get_warns(infractions)
         lwarns = sum(1 for w in warns if w[1] == "lwarn")
@@ -2117,11 +2259,11 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 user_id=member.id, infr_type="softban", reason=reason,
                 timestamp=current_ts, perpetrator=ctx.author.id)
 
-    @commands.command(aliases=["nitrokick", "nitro", "nk", "scam", "phish", "phishing"])
+    @commands.command(aliases=["nitro_kick", "nitrokick", "nitro", "nk", "scamkick", "scam", "sk", "phish", "phishing"])
     @utils.is_allowed(allowed_roles, throw_exc=True)
-    async def nitro_kick(self, ctx, member: Optional[discord.Member] = None, internal_use: bool = False) -> None:
-        """ (ModTeam/ADM) Mutes & Softbans a member from the server who's posting Nitro scam links.
-        :param member: The @ or ID of the user to nitrokick.
+    async def scam_kick(self, ctx, member: Optional[discord.Member] = None, internal_use: bool = False) -> None:
+        """ (ModTeam/ADM) Mutes & Softbans a member from the server who's posting scam links.
+        :param member: The @ or ID of the user to scam-kick.
         :param internal_use: Whether to bypass the moderator request process for internal use. """
     
         await ctx.message.delete()
@@ -2131,28 +2273,28 @@ We appreciate your understanding and look forward to hearing from you. """, embe
 
         current_ts: int = await utils.get_timestamp()
 
-        reason = "Nitro Scam"
+        reason = "**Scam-kicked** *by staff members.*"
 
         if not member:
             return await ctx.send(f"**Member not found, {author.mention}!**", delete_after=3)
 
         if await utils.is_allowed(allowed_roles).predicate(channel=ctx.channel, member=member):
-            return await ctx.send(f"**You cannot nitrokick a staff member, {author.mention}!**")
+            return await ctx.send(f"**You cannot scam-kick a staff member, {author.mention}!**")
         
         perpetrators = []
         confirmations = {}
 
-        should_nitro_kick = internal_use or await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=author)
+        should_scam_kick = internal_use or await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=author)
 
-        if not should_nitro_kick and not internal_use:
+        if not should_scam_kick and not internal_use:
             confirmations[author.id] = author.name
             mod_softban_embed = discord.Embed(
-                title=f"NitroKick Request ({len(confirmations)}/3)",
+                title=f"Scam-Kick Request ({len(confirmations)}/3)",
                 description=f'''
-                {author.mention} wants to nitrokick {member.mention}, it requires 2 more moderator ✅ reactions for it!
+                {author.mention} wants to scam-kick {member.mention}, it requires 2 more moderator ✅ reactions for it!
                 ```Reason: {reason}```''',
                 colour=discord.Colour.nitro_pink(), timestamp=ctx.message.created_at)
-            mod_softban_embed.set_author(name=f'{member} is being NitroKicked!', icon_url=member.display_avatar)
+            mod_softban_embed.set_author(name=f'{member} is being Scam-Kicked!', icon_url=member.display_avatar)
             msg = await ctx.send(embed=mod_softban_embed)
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
@@ -2185,29 +2327,29 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                 try:
                     r, u = await self.client.wait_for("reaction_add", timeout=3600, check=check_mod)
                 except asyncio.TimeoutError:
-                    mod_softban_embed.description = f"Timeout, {member} is not getting nitrobanned!"
+                    mod_softban_embed.description = f"Timeout, {member} is not getting scam-kicked!"
                     await msg.remove_reaction("✅", self.client.user)
                     await msg.remove_reaction("❌", self.client.user)
                     return await msg.edit(embed=mod_softban_embed)
                 else:
-                    mod_softban_embed.title = f"NitroKick Request ({len(confirmations)}/3)"
+                    mod_softban_embed.title = f"Scam-Kick Request ({len(confirmations)}/3)"
                     await msg.edit(embed=mod_softban_embed)
                     if str(r.emoji) == "✅":
                         if await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=u):
-                            should_nitro_kick = True
+                            should_scam_kick = True
                             await msg.remove_reaction("❌", self.client.user)
                             break
                         elif len(confirmations) >= 0:
                             if len(confirmations) < 3:
                                 continue
                             elif len(confirmations) >= 3:
-                                should_nitro_kick = True
+                                should_scam_kick = True
                                 await msg.remove_reaction("❌", self.client.user)
                                 break
                     elif str(r.emoji) == "❌":
                         if await utils.is_allowed([staff_manager_role_id]).predicate(channel=ctx.channel, member=u):
-                            mod_softban_embed.title = "NitroKick Request"
-                            mod_softban_embed.description = "NitroKick request denied."
+                            mod_softban_embed.title = "Scam-Kick Request"
+                            mod_softban_embed.description = "Scam-Kick request denied."
                             await msg.edit(embed=mod_softban_embed)
                             await msg.remove_reaction("✅", self.client.user)
                             await msg.remove_reaction("❌", self.client.user)
@@ -2218,7 +2360,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                     else:
                         break
 
-        if not should_nitro_kick:
+        if not should_scam_kick:
             return
 
         # Checks if it was a moderator ban request or just a normal ban
@@ -2232,10 +2374,10 @@ We appreciate your understanding and look forward to hearing from you. """, embe
         # Bans and logs
         # General embed
         general_embed = discord.Embed(description=f'**Reason:** {reason}', color=discord.Color.nitro_pink())
-        general_embed.set_author(name=f'{member} has been nitrokicked', icon_url=member.display_avatar)
+        general_embed.set_author(name=f'{member} has been scam-kicked', icon_url=member.display_avatar)
         await ctx.send(embed=general_embed)
         try:
-            await member.send(content="Your account has been compromised and is now sending nitro scam links, please change your password and enable 2 Factor Authentication in order to regain access to our server\n\nhttps://discord.gg/languages", embed=general_embed)
+            await member.send(content="Your account has been compromised and is now sending scam messages, images and/or links, please change your password and enable 2 Factor Authentication in order to regain access to our server\n\nhttps://discord.gg/languages", embed=general_embed)
         except Exception as e:
             pass
         try:
@@ -2254,7 +2396,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
             current_ts = await utils.get_timestamp()
             infr_date = datetime.fromtimestamp(current_ts).strftime('%Y/%m/%d at %H:%M')
             perpetrator = ctx.author.name if ctx.author else "Unknown"
-            embed = discord.Embed(title='__**NitroKick**__', color=discord.Color.nitro_pink(),
+            embed = discord.Embed(title='__**Scam-Kick**__', color=discord.Color.nitro_pink(),
                                 timestamp=ctx.message.created_at)
             embed.add_field(name='User info:', value=f'```Name: {member.display_name}\nId: {member.id}```',
                             inline=False)
@@ -2602,8 +2744,6 @@ We appreciate your understanding and look forward to hearing from you. """, embe
         embed.set_footer(text=f"Requested by {member}", icon_url=member.display_avatar)
         await ctx.send(embed=embed)
 
-
-
     # Infraction methods
     @commands.command(aliases=['infr', 'show_warnings', 'sw', 'show_bans', 'sb', 'show_muted', 'sm'])
     @commands.check_any(utils.is_allowed([*allowed_roles, event_manager_role_id, lesson_manager_role_id, analyst_debugger_role_id], throw_exc=True), utils.is_subscriber())
@@ -2673,19 +2813,23 @@ We appreciate your understanding and look forward to hearing from you. """, embe
                     unmute_alert = f"\u200b\n**♦️ This user will be unmuted <t:{times[0] + times[1]}:R>**\n\n"
 
             user_infractions = list(user_infractions)
-            user_infractions.sort(key=lambda x: x[3], reverse=False) # "reverse=True" for newest to oldest, "reverse=False" for oldest to newest 
+            reverse_mode = len(user_infractions) > 20
+            user_infractions.sort(key=lambda x: x[3], reverse=reverse_mode)
 
             embed = discord.Embed(
                 title=f"Infractions for {member}",
-                description=f"{unmute_alert}```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*2)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
+                description=f"{unmute_alert}```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*1.5)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
                 color=member.color,
                 timestamp=ctx.message.created_at
             )
+            if len(user_infractions) > 20:
+                embed.description = embed.description + "\n-# **`Found more than 20 infractions.`**\n-# *`Because of Discord limitations, showing only the latest 20 infractions and they are ordered from newest to oldest.`*"
             embed.set_thumbnail(url=member.display_avatar)
-            embed.set_author(name=member.id)    
+            embed.set_author(name=member.id)
             embed.set_footer(text=f"Requested by: {ctx.author}", icon_url=ctx.author.display_avatar)
 
-            for _, infr in enumerate(user_infractions):
+            # only shows the last 20 infractions to avoid Discord embed limitations (and the error that causes the list to not show at all)
+            for _, infr in enumerate(user_infractions[:20]):
                 infr_date = datetime.fromtimestamp(infr[3]).strftime('%Y/%m/%d at %H:%M')
                 perpetrator_member = discord.utils.get(ctx.guild.members, id=infr[5])
                 perpetrator = perpetrator_member.name if perpetrator_member else "Unknown"
@@ -2799,7 +2943,7 @@ We appreciate your understanding and look forward to hearing from you. """, embe
 
                     embed = discord.Embed(
                         title=f"Removed Infractions for {member}",
-                        description=f"```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*2)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
+                        description=f"```ini\n[Warns]: {warns+(lwarns/2)+(hwarns*1.5)} | [Mutes]: {mutes} | [Kicks]: {kicks}\n[Bans]: {bans+softbans} | [Hackbans]: {hackbans} | [Watchlist]: {wl_entries}```",
                         colour=discord.Colour.dark_red(),
                         timestamp=ctx.message.created_at
                     )

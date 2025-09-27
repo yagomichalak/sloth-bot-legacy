@@ -51,7 +51,7 @@ class Communication(*tool_cogs):
         self.daily_global_chat_name_change.start()
         print('[.cogs] Communication cog is ready!')
 
-    @tasks.loop(hours=24)
+    @tasks.loop(hours=12)
     async def daily_global_chat_name_change(self) -> None:
         """ Changes the name of the global chat once a day. """
 

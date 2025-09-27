@@ -87,6 +87,9 @@ class ReportSupport(*report_support_classes):
             guild = self.client.get_guild(server_id)
             channel = discord.utils.get(guild.channels, id=inactive_case[1])
 
+            if channel.name.endswith("-ongoing"):
+                continue # it will skip the "ongoing" cases
+
             if channel:
                 try:
                     await self.close_and_log_case_channel(guild, channel, self.client.user, True)
@@ -569,7 +572,31 @@ class ReportSupport(*report_support_classes):
                 forbid += 1
 
         return await ctx.send(f"**`{forbid}` {'witnesses/roles have' if forbid > 1 else 'witness/role has'} been forbidden from here!**")
-            
+
+    @commands.command(aliases=['ongoing', 'ongoingcase', 'dont_close', "dontclose", "stay_open", "stayopen", "keep_open", "keepopen"])
+    @utils.is_allowed([staff_manager_role_id], throw_exc=True)
+    async def ongoing_case(self, ctx):
+        """ (MOD) Marks the case as an ongoing case, which prevents it from being automatically closed by the bot. """
+        
+        await ctx.message.delete()
+        
+        case_channel = await self.get_case_channel(ctx.channel.id)
+        if not case_channel:
+            return await ctx.send(f"**This is not a case channel, {ctx.author.mention}!**", delete_after=6)
+
+        channel = discord.utils.get(ctx.guild.text_channels, id=case_channel[0][1])
+        if channel.name.endswith("-ongoing"):
+            return await ctx.send(f"**This case is already marked as an ongoing case, {ctx.author.mention}!**", delete_after=6)
+
+        embed = discord.Embed(
+            description="**Ongoing case.** Don't close!",
+            color=discord.Color.green()
+        )
+        await ctx.send(embed=embed)
+        
+        await channel.edit(name=f"{channel.name}-ongoing")
+        await ctx.send(f"**This case is now marked as an ongoing case, {ctx.author.mention}!**", delete_after=6)
+
     @commands.command(aliases=['delete_channel', 'archive', 'cc', "close_case", "end_case", "solve", "solved"])
     @commands.has_any_role(*allowed_roles)
     async def close_channel(self, ctx):
@@ -702,29 +729,53 @@ class ReportSupport(*report_support_classes):
                 if message.content or message.embeds:
                     if message.embeds:
                         for i in range(0, len(message.embeds), 10):
+                            try:
+                                await webhook.send(
+                                    content=safe_content if message.content and i == 0 else None,
+                                    username=user_name,
+                                    avatar_url=user_avatar,
+                                    embeds=message.embeds[i:i+10],
+                                    thread=thread
+                                )
+                            except Exception as e:
+                                await webhook.send(
+                                    content=f"**[ERROR!]** Failed while forwarding a message with embeds.\n-# **Error:** {e}",
+                                    userame=user_name,
+                                    avatar_url=user_avatar,
+                                    thread=thread
+                                )
+                    else:
+                        try:
                             await webhook.send(
-                                content=safe_content if message.content and i == 0 else None,
+                                content=safe_content if message.content else None,
                                 username=user_name,
                                 avatar_url=user_avatar,
-                                embeds=message.embeds[i:i+10],
                                 thread=thread
                             )
-                    else:
+                        except Exception as e:
+                            await webhook.send(
+                                content=f"**[ERROR!]** Failed while forwarding a message.\n-# **Error:** {e}",
+                                userame=user_name,
+                                avatar_url=user_avatar,
+                                thread=thread
+                            )
+
+                if message.attachments:
+                    try:
+                        files = [await attachment.to_file() for attachment in message.attachments]
                         await webhook.send(
-                            content=safe_content if message.content else None,
                             username=user_name,
+                            avatar_url=user_avatar,
+                            files=files,
+                            thread=thread
+                        )
+                    except Exception as e:
+                        await webhook.send(
+                            content=f"**[ERROR!]** Failed while forwarding a file.\n-# **Error:** {e}",
+                            userame=user_name,
                             avatar_url=user_avatar,
                             thread=thread
                         )
-
-                if message.attachments:
-                    files = [await attachment.to_file() for attachment in message.attachments]
-                    await webhook.send(
-                        username=user_name,
-                        avatar_url=user_avatar,
-                        files=files,
-                        thread=thread
-                    )
                 
         # close/archive the thread after forwarding all messages
         await thread.edit(archived=True, locked=True)
@@ -774,7 +825,8 @@ class ReportSupport(*report_support_classes):
 
         # Set channel perms for the user.
         await parent_channel.set_permissions(applicant, read_messages=True, send_messages=False, view_channel=True)
-        # await interview_vc.set_permissions(applicant, speak=True, connect=True, view_channel=True)
+        if app[2].title().lower == "teacher":
+            await interview_vc.set_permissions(applicant, speak=True, connect=True, view_channel=True)
 
         application_type = app[2].title().replace('_', ' ')
 
@@ -910,6 +962,32 @@ class ReportSupport(*report_support_classes):
         self.client.add_view(view=premiumView)
         self.client.add_view(view=applyView)
         self.client.add_view(view=reportView)
+
+    # temporary command, will be removed in the next update
+    @commands.command()
+    @utils.is_allowed([staff_manager_role_id], throw_exc=True)
+    async def clean_one_specific_case_log(self, ctx) -> None:
+        """ (Staff Management) Cleans up a specific old case log (threads) that spammed itself sooo many times. Temporary command, will be removed later. """
+
+        await ctx.message.delete()
+
+        case_log_channel = self.client.get_channel(case_log_id)
+        deleted_threads = 0
+
+        if not case_log_channel:
+            await ctx.send("**Case log channel not found!**")
+            return
+
+        threads = await case_log_channel.threads()
+        for thread in threads:
+            if thread.name == "case-18122-log":
+                try:
+                    await thread.delete()
+                    deleted_threads += 1
+                except Exception as e:
+                    print(f"Failed to delete thread {thread.name}: {e}")
+
+        await ctx.send(f"**Deleted {deleted_threads} thread(s) named 'case-18122-log'.**", delete_after=11)
 
 def setup(client):
     client.add_cog(ReportSupport(client))
