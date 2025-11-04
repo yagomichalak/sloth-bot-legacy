@@ -544,6 +544,9 @@ async def reload(ctx, extension: str = None) -> None:
 
 forbidden_files: List[str] = [
     # 'createdynamicroom.py'
+    'moderation.py',
+    'reportsupport.py',
+    'modactivity.py',
 ]
 
 for filename in os.listdir('./cogs'):
