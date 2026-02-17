@@ -1113,8 +1113,8 @@ class Merchant(Player):
             else:
                 return await ctx.send(f"**{member} doesn't have a pet, {author.mention}!**")
 
-        # Gets parents' profile pictures
-        pet_owner_pfp = await utils.get_user_pfp(member)
+        # Gets pet owner's profile picture (handles owner who left the server)
+        pet_owner_pfp = await utils.get_user_pfp_or_placeholder(self.client, member)
         auto_feed = True if user_pet[8] else False
 
         # Makes the Pet's Image

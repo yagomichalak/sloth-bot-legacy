@@ -446,6 +446,73 @@ async def get_user_pfp(member, thumb_width: int = 59) -> Image:
     im_thumb = mask_circle_transparent(im_square, 4)
     return im_thumb
 
+
+def _process_avatar_to_thumbnail(im, thumb_width: int = 59) -> Image.Image:
+    """ Helper to crop and mask an avatar image to thumbnail format. """
+    def crop_center(pil_img, crop_width, crop_height):
+        img_width, img_height = pil_img.size
+        return pil_img.crop(((img_width - crop_width) // 2,
+                             (img_height - crop_height) // 2,
+                             (img_width + crop_width) // 2,
+                             (img_height + crop_height) // 2))
+
+    def crop_max_square(pil_img):
+        return crop_center(pil_img, min(pil_img.size), min(pil_img.size))
+
+    def mask_circle_transparent(pil_img, blur_radius, offset=0):
+        offset = blur_radius * 2 + offset
+        mask = Image.new("L", pil_img.size, 0)
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((offset, offset, pil_img.size[0] - offset, pil_img.size[1] - offset), fill=255)
+        result = pil_img.copy()
+        result.putalpha(mask)
+        return result
+
+    im_square = crop_max_square(im).resize((thumb_width, thumb_width), Image.LANCZOS)
+    return mask_circle_transparent(im_square, 4)
+
+
+async def get_default_avatar_thumbnail(thumb_width: int = 59) -> Image.Image:
+    """ Returns a default Discord avatar as thumbnail (same format as get_user_pfp).
+    Used when a user has left the server or deleted their account. """
+    default_avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
+    async with session.get(default_avatar_url) as response:
+        image_bytes = await response.content.read()
+        with BytesIO(image_bytes) as pfp:
+            image = Image.open(pfp)
+            im = image.convert('RGBA')
+    return _process_avatar_to_thumbnail(im, thumb_width)
+
+
+async def get_user_pfp_safe(bot, guild: discord.Guild, user_id: int, thumb_width: int = 59) -> Image.Image:
+    """ Gets the user's profile picture by ID, with fallback for users not in guild or deleted.
+    :param bot: The bot instance.
+    :param guild: The guild to look up the member in.
+    :param user_id: The user ID.
+    :param thumb_width: The width of the thumbnail. [Default = 59] """
+    member = guild.get_member(user_id)
+    if member:
+        return await get_user_pfp(member, thumb_width)
+    try:
+        user = await bot.fetch_user(user_id)
+        return await get_user_pfp(user, thumb_width)
+    except discord.NotFound:
+        return await get_default_avatar_thumbnail(thumb_width)
+
+
+async def get_user_pfp_or_placeholder(bot, user: Optional[Union[discord.Member, discord.User]], thumb_width: int = 59) -> Image.Image:
+    """ Gets the user's profile picture, or a default placeholder if user is None or fetch fails.
+    :param bot: The bot instance (used for fallback fetch when needed).
+    :param user: The member or user to get the avatar from.
+    :param thumb_width: The width of the thumbnail. [Default = 59] """
+    if user is None:
+        return await get_default_avatar_thumbnail(thumb_width)
+    try:
+        return await get_user_pfp(user, thumb_width)
+    except Exception:
+        return await get_default_avatar_thumbnail(thumb_width)
+
+
 async def get_member_public_flags(member: discord.Member) -> List[str]:
     """ Gets the member's public flags.
     :param member: The member to get the flags from. """

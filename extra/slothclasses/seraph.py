@@ -671,12 +671,9 @@ class Seraph(Player):
             else:
                 return await ctx.send(f"**{member} doesn't have a baby, {author.mention}!**")
 
-        # Gets the baby's parents
-        parent_one: discord.Member = ctx.guild.get_member(user_baby[0])
-        parent_two: discord.Member = ctx.guild.get_member(user_baby[1])
-        # Gets parents' profile pictures
-        p1pfp = await utils.get_user_pfp(parent_one)
-        p2pfp = await utils.get_user_pfp(parent_two)
+        # Gets parents' profile pictures (fetch user if not in server - they may have left)
+        p1pfp = await utils.get_user_pfp_safe(self.client, ctx.guild, user_baby[0])
+        p2pfp = await utils.get_user_pfp_safe(self.client, ctx.guild, user_baby[1])
 
         # Makes the Baby's Image
 
